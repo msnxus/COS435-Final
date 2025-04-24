@@ -16,12 +16,15 @@ import random
 
 
 class TrafficEnv(gym.Env):
-    def __init__(self, trafficmap_dir, time_per_step=30):
+    def __init__(self, trafficmap_dir, time_per_step=30, max_steps=50):
         super().__init__()
         self.trafficmap_dir = trafficmap_dir
         self.files = [f for f in os.listdir(trafficmap_dir)]
         file = os.path.join(trafficmap_dir,self.files[0])
         self.trafficmap_tensor = torch.load(file)
+
+        self.max_steps = max_steps
+        self.num_steps = 0
 
         self.n_vertices=self.trafficmap_tensor.shape[0]
         self.n_timesteps = self.trafficmap_tensor.shape[2]
@@ -29,19 +32,23 @@ class TrafficEnv(gym.Env):
         self.cum_time_step = 0
         self.time_per_step = time_per_step
         self.current_vertex = None
-        self.visited_vertices = set()
+        self.visited_vertices = torch.zeros(self.n_vertices, dtype=torch.bool)
         self.next_optimal_paths = None
+        
+        self.completion_reward = 10
+        self.visited_weight = 10
 
-        self.inf = 10**9
+        # self.inf = 10**9
+        self.inf = 100
     
         # Define action and observation space
         self.action_space = spaces.Discrete(self.n_vertices)
         self.observation_space = spaces.Tuple((
             spaces.Box(low=0, high=self.inf, shape=(self.n_vertices, self.n_vertices, self.n_timesteps), dtype=np.float32),
-            spaces.Box(low=0, high=1, shape=(self.n_vertices,), dtype=np.float32)  # after dijstras
+            spaces.Box(low=0, high=self.inf, shape=(self.n_vertices,), dtype=np.float32),  # next_optimal_paths
+            spaces.MultiBinary(self.n_vertices),  # visited_vertices
+            spaces.Discrete(self.n_vertices)  # current_vertex
         ))
-
-
 
 
     # Resets the agents current travel time
@@ -50,20 +57,31 @@ class TrafficEnv(gym.Env):
         super().reset(seed=seed)
         randomly_selected_file = random.choice(self.files)
         file_path = os.path.join(self.trafficmap_dir, randomly_selected_file)
-        self.trafficmap_tensor = torch.load(file_path)
+        # self.trafficmap_tensor = torch.load(file_path)
         self.cum_time = 0
         self.cum_time_step = 0
         self.current_time_step = 0
         self.current_vertex = random.randrange(0, self.n_vertices)
+        self.visited_vertices = torch.zeros(self.n_vertices, dtype=torch.bool)
 
         # Compute the shortest distances between current point and every other point in this time step
         # self.trafficmap_tensor[self.current_vertex, :, 0] = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
-        next_optimal_paths = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
-        self.next_optimal_paths = next_optimal_paths
+        # self.next_optimal_paths = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
+        self.next_optimal_paths = self.trafficmap_tensor[self.current_vertex,:,0]
 
-        observation = (self.trafficmap_tensor.clone().float(), self.next_optimal_paths.clone().float())
+        observation = (
+            self.trafficmap_tensor.cpu().numpy(),
+            self.next_optimal_paths.cpu().numpy(),
+            self.visited_vertices.cpu().numpy(),
+            self.current_vertex
+        )
+
+        
+
+        # observation = (self.trafficmap_tensor.clone().float(), self.next_optimal_paths.clone().float())
         info = {}
-        self.visited_vertices.add(self.current_vertex)
+        self.visited_vertices[self.current_vertex] = 1
+        self.num_steps = 0
         return observation, info
 
 
@@ -87,30 +105,40 @@ class TrafficEnv(gym.Env):
         self.cum_time = self.cum_time % self.time_per_step
 
         # Create the next state
-        new_tensor = torch.zeros(self.trafficmap_tensor.shape)
-        new_tensor[:,:,:] = self.inf
-        print('NUMBER OF SHIFTS', num_shifts)
         if num_shifts > 0:
-            new_tensor[:, :, :-num_shifts] = self.trafficmap_tensor[:, :, num_shifts:]
-        else:
-            new_tensor = self.trafficmap_tensor
+            self.trafficmap_tensor = torch.roll(self.trafficmap_tensor, shifts=-num_shifts, dims=2)
+            self.trafficmap_tensor[:, :, -num_shifts:] = 0
+
 
         
         
         # Compute the shortest distances between current point and every other point in this time step
         # self.trafficmap_tensor[self.current_vertex, :, 0] = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
-        self.next_optimal_paths = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
+        # self.next_optimal_paths = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
+        self.next_optimal_paths = self.trafficmap_tensor[self.current_vertex,:,0]
         
         
-        new_tensor[i,:, :] = self.inf
-        new_tensor[:,i,:] = self.inf
-        self.trafficmap_tensor = new_tensor
-        observation = (self.trafficmap_tensor.clone().float(), self.next_optimal_paths.clone().float())
+        # self.trafficmap_tensor[i,:, :] = self.inf
+        self.trafficmap_tensor[:,i, :] = self.inf
+        
+        
+        
+        observation = (
+            self.trafficmap_tensor.cpu().numpy(),
+            self.next_optimal_paths.cpu().numpy(),
+            self.visited_vertices.cpu().numpy(),
+            self.current_vertex
+        )
 
+        
 
+        
         self.current_vertex = j
-        self.visited_vertices.add(self.current_vertex)
-        done = len(self.visited_vertices) >= self.n_vertices
+        self.visited_vertices[self.current_vertex] = 1
+        self.num_steps += 1
+        num_visited= self.visited_vertices.sum()
+        done = num_visited >= self.n_vertices or self.num_steps >= self.max_steps
+        reward += num_visited*self.visited_weight
         info = {}
         return observation, reward, done, False, info
 

@@ -28,7 +28,9 @@ def print_state(obs, n):
 def test_traffic_env_behavior():
     with tempfile.TemporaryDirectory() as tmp_dir:
         save_dummy_tensor_to_dir(tmp_dir)
-        env = TrafficEnv(trafficmap_dir=tmp_dir)
+        env = TrafficEnv(trafficmap_dir='traffic_maps')
+
+
         
         obs, info = env.reset()
         print_state(obs, env.n_timesteps)
@@ -37,6 +39,8 @@ def test_traffic_env_behavior():
         assert isinstance(obs, tuple), "Observation should be a tuple"
         assert len(obs) == 2, "Observation should have 2 elements"
         traffic_tensor, dijkstra_tensor = obs
+        traffic_tensor = torch.Tensor(traffic_tensor)
+        dijkstra_tensor = torch.Tensor(dijkstra_tensor)
         assert isinstance(traffic_tensor, torch.Tensor)
         assert isinstance(dijkstra_tensor, torch.Tensor)
         assert traffic_tensor.shape == (env.n_vertices, env.n_vertices, env.n_timesteps)
@@ -61,13 +65,16 @@ def test_traffic_env_behavior():
 
             # Unpack observation again
             traffic_tensor, dijkstra_tensor = obs
+            
+            traffic_tensor = torch.Tensor(traffic_tensor)
+            dijkstra_tensor = torch.Tensor(dijkstra_tensor)
 
             # Test 1: current_vertex is updated
             assert env.current_vertex == action, "current_vertex not updated correctly"
 
             # Test 2: visited_vertices updates correctly
-            assert action in env.visited_vertices, "visited_vertices missing the action"
-            assert len(env.visited_vertices) == len(visited) + 1, "visited_vertices size incorrect"
+            assert env.visited_vertices[action] == 1, "visited_vertices missing the action"
+            assert env.visited_vertices.sum() == len(visited) + 1, "visited_vertices size incorrect"
 
             # Test 3: cum_time is valid
             assert env.cum_time >= 0, "cum_time should not be negative"
