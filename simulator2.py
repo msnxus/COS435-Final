@@ -18,31 +18,25 @@ import random
 class TrafficEnv(gym.Env):
     def __init__(self, trafficmap_dir, time_per_step=30, max_steps=50):
         super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.trafficmap_dir = trafficmap_dir
         self.files = [f for f in os.listdir(trafficmap_dir)]
         file = os.path.join(trafficmap_dir,self.files[0])
-        self.trafficmap_tensor = torch.load(file).to(self.device)
-        
+        self.trafficmap_tensor = torch.load(file)
 
         self.max_steps = max_steps
         self.num_steps = 0
 
-
-        self.n_vertices = self.trafficmap_tensor.shape[1]
+        self.n_vertices=self.trafficmap_tensor.shape[0]
         self.n_timesteps = self.trafficmap_tensor.shape[2]
         self.cum_time = 0
         self.cum_time_step = 0
         self.time_per_step = time_per_step
         self.current_vertex = None
+        self.visited_vertices = torch.zeros(self.n_vertices, dtype=torch.bool)
         self.next_optimal_paths = None
-
-        self.visited_vertices = torch.ones(self.n_vertices, dtype=torch.bool, device=self.device)       
-
-
         
         self.completion_reward = 10
-        self.visited_weight = 0
+        self.visited_weight = 10
 
         # self.inf = 10**9
         self.inf = 100
@@ -67,21 +61,16 @@ class TrafficEnv(gym.Env):
         self.cum_time = 0
         self.cum_time_step = 0
         self.current_time_step = 0
-        # self.current_vertex = random.randrange(0, self.n_vertices)
-        self.current_vertex = 0
-        self.visited_vertices = torch.ones(self.n_vertices, dtype=torch.bool, device=self.device)
-
-
-
+        self.current_vertex = random.randrange(0, self.n_vertices)
+        self.visited_vertices = torch.zeros(self.n_vertices, dtype=torch.bool)
 
         # Compute the shortest distances between current point and every other point in this time step
         # self.trafficmap_tensor[self.current_vertex, :, 0] = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
         # self.next_optimal_paths = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
         self.next_optimal_paths = self.trafficmap_tensor[self.current_vertex,:,0]
 
-
         observation = (
-            # self.trafficmap_tensor.cpu().numpy(),
+            self.trafficmap_tensor.cpu().numpy(),
             self.next_optimal_paths.cpu().numpy(),
             self.visited_vertices.cpu().numpy(),
             self.current_vertex
@@ -91,8 +80,7 @@ class TrafficEnv(gym.Env):
 
         # observation = (self.trafficmap_tensor.clone().float(), self.next_optimal_paths.clone().float())
         info = {}
-        self.visited_vertices[self.current_vertex] = 0
-        self.trafficmap_tensor[:,self.current_vertex, :] = self.inf
+        self.visited_vertices[self.current_vertex] = 1
         self.num_steps = 0
         return observation, info
 
@@ -109,13 +97,7 @@ class TrafficEnv(gym.Env):
         
         self.cum_time += travel_time
         reward = -travel_time
-
-        reward = 0
-        if travel_time == self.inf:
-            travel_time = 0
-            reward = -10
-        else: 
-            reward = + 10
+        
 
         num_shifts = int(self.cum_time // self.time_per_step)
         self.current_time_step += num_shifts
@@ -123,12 +105,8 @@ class TrafficEnv(gym.Env):
         self.cum_time = self.cum_time % self.time_per_step
 
         # Create the next state
-        self.trafficmap_tensor[:,j, :] = self.inf
-        # self.trafficmap_tensor[j,: :] = self.inf
-
         if num_shifts > 0:
             self.trafficmap_tensor = torch.roll(self.trafficmap_tensor, shifts=-num_shifts, dims=2)
-            
             self.trafficmap_tensor[:, :, -num_shifts:] = 0
 
 
@@ -137,17 +115,16 @@ class TrafficEnv(gym.Env):
         # Compute the shortest distances between current point and every other point in this time step
         # self.trafficmap_tensor[self.current_vertex, :, 0] = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
         # self.next_optimal_paths = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
-        self.current_vertex = j
         self.next_optimal_paths = self.trafficmap_tensor[self.current_vertex,:,0]
         
         
         # self.trafficmap_tensor[i,:, :] = self.inf
-        
+        self.trafficmap_tensor[:,i, :] = self.inf
         
         
         
         observation = (
-            # self.trafficmap_tensor.cpu().numpy(),
+            self.trafficmap_tensor.cpu().numpy(),
             self.next_optimal_paths.cpu().numpy(),
             self.visited_vertices.cpu().numpy(),
             self.current_vertex
@@ -156,13 +133,12 @@ class TrafficEnv(gym.Env):
         
 
         
-        if self.visited_vertices[j] == 1:
-            reward += self.visited_weight
-        self.visited_vertices[j] = 0
+        self.current_vertex = j
+        self.visited_vertices[self.current_vertex] = 1
         self.num_steps += 1
-        num_visited= self.n_vertices - self.visited_vertices.sum()
+        num_visited= self.visited_vertices.sum()
         done = num_visited >= self.n_vertices or self.num_steps >= self.max_steps
-        # reward += num_visited*self.visited_weight
+        reward += num_visited*self.visited_weight
         info = {}
         return observation, reward, done, False, info
 
@@ -175,21 +151,21 @@ class TrafficEnv(gym.Env):
 
 
 # Shortest All-Paths Algorithm
-def floyd_warshall(adj, device):
+def floyd_warshall(adj):
     n = adj.size(0)
     dist = adj.clone()
 
     for k in range(n):
-        dist = torch.minimum(dist, dist[:, k].unsqueeze(1) + dist[k, :].unsqueeze(0), device=device)
+        dist = torch.minimum(dist, dist[:, k].unsqueeze(1) + dist[k, :].unsqueeze(0))
 
     return dist
 
 
 # Dijstra's
-def dijkstra(adj, start, device):
+def dijkstra(adj, start):
     LARGE = 1e9
     n = adj.size(0)
-    visited = torch.zeros(n, dtype=torch.bool, device=device)
+    visited = torch.zeros(n, dtype=torch.bool)
     dist = torch.full((n,), LARGE)
     dist[start] = 0
 

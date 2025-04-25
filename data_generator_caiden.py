@@ -57,8 +57,8 @@ if __name__ == '__main__':
     outdir = 'traffic_maps'
     os.makedirs(outdir, exist_ok=True)
     N = 10
-    T = 50
-    num_graphs = 50
+    T = 10
+    num_graphs = 1
     for i in tqdm(range(num_graphs)):
         adj = generate(N, T)
         graph = floyd_warshall(adj)
