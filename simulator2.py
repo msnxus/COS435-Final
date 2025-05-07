@@ -36,7 +36,7 @@ class TrafficEnv(gym.Env):
         self.next_optimal_paths = None
         
         self.completion_reward = 10
-        self.visited_weight = 10
+        self.visited_weight = 0
 
         # self.inf = 10**9
         self.inf = 100
@@ -61,7 +61,8 @@ class TrafficEnv(gym.Env):
         self.cum_time = 0
         self.cum_time_step = 0
         self.current_time_step = 0
-        self.current_vertex = random.randrange(0, self.n_vertices)
+        # self.current_vertex = random.randrange(0, self.n_vertices)
+        self.current_vertex = 0
         self.visited_vertices = torch.zeros(self.n_vertices, dtype=torch.bool)
 
         # Compute the shortest distances between current point and every other point in this time step
@@ -70,11 +71,13 @@ class TrafficEnv(gym.Env):
         self.next_optimal_paths = self.trafficmap_tensor[self.current_vertex,:,0]
 
         observation = (
-            self.trafficmap_tensor.cpu().numpy(),
+            # self.trafficmap_tensor.cpu().numpy(),
             self.next_optimal_paths.cpu().numpy(),
             self.visited_vertices.cpu().numpy(),
             self.current_vertex
         )
+
+        self.trafficmap_tensor[:,self.current_vertex, :] = self.inf
 
         
 
@@ -105,6 +108,7 @@ class TrafficEnv(gym.Env):
         self.cum_time = self.cum_time % self.time_per_step
 
         # Create the next state
+        self.trafficmap_tensor[:,j, :] = self.inf
         if num_shifts > 0:
             self.trafficmap_tensor = torch.roll(self.trafficmap_tensor, shifts=-num_shifts, dims=2)
             self.trafficmap_tensor[:, :, -num_shifts:] = 0
@@ -115,16 +119,17 @@ class TrafficEnv(gym.Env):
         # Compute the shortest distances between current point and every other point in this time step
         # self.trafficmap_tensor[self.current_vertex, :, 0] = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
         # self.next_optimal_paths = dijkstra(self.trafficmap_tensor[:,:,0], self.current_vertex)
-        self.next_optimal_paths = self.trafficmap_tensor[self.current_vertex,:,0]
+        self.current_vertex = j
+        self.next_optimal_paths = self.trafficmap_tensor[j,:,0]
         
         
         # self.trafficmap_tensor[i,:, :] = self.inf
-        self.trafficmap_tensor[:,i, :] = self.inf
+        
         
         
         
         observation = (
-            self.trafficmap_tensor.cpu().numpy(),
+            # self.trafficmap_tensor.cpu().numpy(),
             self.next_optimal_paths.cpu().numpy(),
             self.visited_vertices.cpu().numpy(),
             self.current_vertex
@@ -133,7 +138,7 @@ class TrafficEnv(gym.Env):
         
 
         
-        self.current_vertex = j
+        
         self.visited_vertices[self.current_vertex] = 1
         self.num_steps += 1
         num_visited= self.visited_vertices.sum()

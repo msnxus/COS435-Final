@@ -13,12 +13,12 @@ from tqdm import tqdm
 
 def generate(n_destinations: int, n_timesteps: int) -> torch.Tensor:
     noise_scale = 0.5
-    noise_mean = 5
+    noise_mean = 20
 
     x = torch.linspace(1e-4, 1-1e-4, n_timesteps)
 
-    alphas = torch.rand(n_destinations, n_destinations) * 4 + 0.5
-    betas = torch.rand(n_destinations, n_destinations) * 4 + 0.5
+    alphas = torch.rand(n_destinations, n_destinations) * 9.5 + 0.1
+    betas = torch.rand(n_destinations, n_destinations) * 9.5 + 0.1
 
     # EXPAND FOR BROADCASTING
     x = x.view(1, 1, n_timesteps).expand(n_destinations, n_destinations, n_timesteps)
@@ -54,7 +54,7 @@ def floyd_warshall(adj):
 
 
 if __name__ == '__main__':
-    outdir = 'traffic_maps'
+    outdir = 'traffic_maps2'
     os.makedirs(outdir, exist_ok=True)
     N = 10
     T = 10

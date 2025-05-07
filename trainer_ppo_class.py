@@ -225,7 +225,7 @@ def train(num_steps=1000, mini_batch_size=8, ppo_epochs=4, threshold=400):
         states = torch.cat(states)
         actions = torch.cat(actions)
         advantage = returns - values
-        advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+        # advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
         advantage = advantage.detach()
 
 
