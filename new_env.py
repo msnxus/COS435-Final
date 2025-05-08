@@ -43,15 +43,15 @@ class CityEnv(gym.Env):
     # Randomly chooses the tensor that represents the traffic map
     def reset(self, *, seed=None, destinations, start_time, start_vertex):
         super().reset(seed=seed)
-        self.destinations = destinations
+        self.destinations = destinations.copy()
         self.current_time = start_time
         self.current_vertex = start_vertex
         self.num_steps = 0
 
         observation = (
-            (self.current_time % self.time_horizon).cpu().numpy(),
-            self.destinations.cpu().numpy(),
-            self.current_vertex.cpu().numpy()
+            self.current_time % self.time_horizon,
+            self.destinations,
+            self.current_vertex
         )
         info = {}
         return observation, info
@@ -72,14 +72,16 @@ class CityEnv(gym.Env):
         # update the current time
         self.current_time += travel_time
         observation = (
-            (self.current_time % self.time_horizon).cpu().numpy(),
-            self.destinations.cpu().numpy(),
-            self.current_vertex.cpu().numpy()
+            self.current_time % self.time_horizon,
+            self.destinations,
+            self.current_vertex
         )
 
         self.num_steps += 1
         done = not self.destinations.any() or self.num_steps >= self.max_steps
         reward = -travel_time
+        if i == j:
+            reward -= 10
         # consider adding auxiliary rewards for visiting new (needed) destinations
         info = {}
         return observation, reward, done, False, info

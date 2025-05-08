@@ -24,6 +24,8 @@ time_horizon = 24
 max_steps = 200
 M = 10
 destinations = np.array([i%2 for i in range(20)])
+start_vertex = 1
+start_time = 0
 
 
 def unpack_obs(obs):
@@ -31,26 +33,30 @@ def unpack_obs(obs):
     current_vertex_onehot = np.zeros(N)
     current_vertex_onehot[current_vertex] = 1
     flat_obs = np.concatenate(([current_time], dests.flatten(), current_vertex_onehot))
-    return flat_obs
+    state = torch.tensor(flat_obs, dtype=torch.float).unsqueeze(0)
+    return state
     
 
 
 def evaluate_policy(policy, poly_matrix, seed=42):
     env_test = CityEnv(poly_matrix, N=N, time_horizon=time_horizon, max_steps=max_steps)
-    obs, _ = env_test.reset(destinations)
+    obs, _ = env_test.reset(destinations=destinations, start_time=start_time, start_vertex=start_vertex)
     state = unpack_obs(obs)
 
     done = False
     total_reward = 0
+    actions = []
     for i in range(env_test.max_steps):
-        state = torch.FloatTensor(state).unsqueeze(0)
         dist = policy(state)
-        obs, reward, done, _, _ = env_test.step(dist.sample().item())
+        action = dist.sample().item()
+        actions.append(action)
+        obs, reward, done, _, _ = env_test.step(action)
         next_state = unpack_obs(obs)
         state = next_state
         total_reward += reward
         if done:
             break
+    print(actions)
     return total_reward
 
 
@@ -135,9 +141,11 @@ def ppo_update(policy_net, value_net, optimizer, ppo_epochs, mini_batch_size, st
             unclipped = r*advantage
             actor_loss = -torch.min(clipped, unclipped).mean()
 
-            critic_loss = (value_net(states) - return_).pow(2).mean()
+            critic_loss = (value_net(states).squeeze(1) - return_).pow(2).mean()
 
-            loss = 0.5 * critic_loss + actor_loss  # You can freely adjust the weight of the critic loss
+            print(actor_loss, critic_loss)
+
+            loss = 0.05 * critic_loss + actor_loss  # You can freely adjust the weight of the critic loss
 
             optimizer.zero_grad()
             loss.backward()
@@ -147,25 +155,21 @@ def ppo_update(policy_net, value_net, optimizer, ppo_epochs, mini_batch_size, st
 
 
 def train(num_steps=1000, mini_batch_size=8, ppo_epochs=4, threshold=400):
+    with open('output1.csv', 'w') as f:
+        f.write('step,reward\n')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    polymatrix = create_poly_matrix(N=N, k=, time_horizon)
-    env = CityEnv(, N=N, time_horizon=time_horizon, max_steps=max_steps)
+    polymatrix = create_poly_matrix(N=N, time_horizon=time_horizon)
+    env = CityEnv(polymatrix, N=N, time_horizon=time_horizon, max_steps=max_steps)
     num_vertices = env.n_vertices
-    num_time_steps = env.n_timesteps
 
-    policy_net = PolicyNetwork(n_T=num_time_steps, n_V=num_vertices, hidden_dim=64)
-    value_net = ValueNetwork(n_T=num_time_steps, n_V=num_vertices, hidden_dim=64)
+    policy_net = PolicyNetwork(N, hidden_dim=64).float()
+    value_net  = ValueNetwork(N, hidden_dim=64).float()
+
     optimizer = optim.Adam(list(policy_net.parameters()) + list(value_net.parameters()), lr=3e-3)
 
-    obs, _ = env.reset()
+    obs, _ = env.reset(destinations=destinations, start_time=start_time, start_vertex=start_vertex)
 
-    traffic_tensor = torch.tensor(obs[0], dtype=torch.float32, device=device)
-    next_paths = torch.tensor(obs[1], dtype=torch.float32, device=device)
-    visited = torch.tensor(obs[2], dtype=torch.float32, device=device)
-    current_vertex = torch.tensor([obs[3]], dtype=torch.long, device=device)
-    current_vertex_onehot = F.one_hot(torch.tensor(current_vertex), num_classes=env.n_vertices).float().squeeze(0)
-
-    state = torch.cat([next_paths, visited, current_vertex_onehot], dim=0).unsqueeze(0)
+    state = unpack_obs(obs)
 
 
     early_stop = False
@@ -182,17 +186,12 @@ def train(num_steps=1000, mini_batch_size=8, ppo_epochs=4, threshold=400):
         # Collect samples under the current policy
         for _ in range(2048):
             
-            dist, value = policy_net(states), value_net(states)
+            dist, value = policy_net(state), value_net(state)
 
             action = dist.sample()
             obs, reward, done, _, _ = env.step(int(action.item()))  # Ensure action is an int
-            traffic_tensor = torch.tensor(obs[0], dtype=torch.float32, device=device)
-            next_paths = torch.tensor(obs[1], dtype=torch.float32, device=device)
-            visited = torch.tensor(obs[2], dtype=torch.float32, device=device)
-            current_vertex = torch.tensor([obs[3]], dtype=torch.long, device=device)
-            current_vertex_onehot = F.one_hot(torch.tensor(current_vertex), num_classes=env.n_vertices).float().squeeze(0)
 
-            state = torch.cat([next_paths, visited, current_vertex_onehot], dim=0).unsqueeze(0)
+            next_state = unpack_obs(obs)
 
 
             log_prob = dist.log_prob(action)
@@ -207,7 +206,8 @@ def train(num_steps=1000, mini_batch_size=8, ppo_epochs=4, threshold=400):
 
             state = next_state
             if done:
-                state, _ = env.reset()  # Ensure proper Gym reset handling
+                obs, _ = env.reset(destinations=destinations, start_time=start_time, start_vertex=start_vertex) 
+                state = unpack_obs(obs)
 
         next_state = torch.tensor(np.array(next_state), dtype=torch.float32).unsqueeze(0)  # Ensure proper conversion
         next_value = value_net(next_state)
@@ -223,9 +223,11 @@ def train(num_steps=1000, mini_batch_size=8, ppo_epochs=4, threshold=400):
         # Run PPO update for policy and value networks
         ppo_update(policy_net, value_net, optimizer, ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantage)
 
-        if step % 1 == 0:
-            test_reward = np.mean([evaluate_policy(policy_net) for _ in range(10)])
+        if step % 10 == 0:
+            test_reward = np.mean([evaluate_policy(policy_net, poly_matrix=polymatrix) for _ in range(10)])
             print(f'Step: {step}\tReward: {test_reward}')
+            with open('output1.csv', 'a') as f:
+                f.write(f'{step},{test_reward}\n')
             reward_list.append(test_reward)
             if test_reward > threshold:
                 print("Solved!")
