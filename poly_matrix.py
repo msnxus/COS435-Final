@@ -1,31 +1,45 @@
 import numpy as np
 class polynomial:
-    def __init__(self, coeffs):
-        self.coeffs = coeffs
+  def __init__(self, roots, constant, scale, zero = False):
+      self.roots = roots
+      self.zero = zero
+      self.constant = constant
+      self.scale = scale
 
-    def eval(self, t):
-      result = 0
-      for coeff in reversed(self.coeffs):
-          result = result * t + coeff
-      return np.max(result, 0)
+  def eval(self, t):
+    if self.zero:
+        return 0
+    else:
+      result = -1
+      for root in self.roots:
+          result *= (t - root)
+      result += self.constant
+      result *= self.scale
+      return max(result, 0)
 
-    def __repr__(self):
-        return " + ".join(f"{coeff} * x^{i}" for i, coeff in enumerate(self.coeffs))
+  def __repr__(self):
+      return " + ".join(f"{coeff} * x^{i}" for i, coeff in enumerate(self.roots))
 
-def create_poly_matrix(N, k, time_horizon):
-    """
-    Create a polynomial matrix of size N x N with random coefficients.
-    Each entry is a polynomial of degree k.
-    """
-    poly_matrix = np.zeros((N, N), dtype=object)
-    for i in range(N):
-        for j in range(N):
-            if i == j:
-                poly_matrix[i, j] = polynomial([0])
-                continue
-            else:
-              c0 = (time_horizon - time_horizon ** (k + 1)) / (1 - time_horizon)
-              coeffs = np.random.uniform(low = -1, high = 1, size = k)
-              coeffs = np.insert(coeffs, 0, c0)
-              poly_matrix[i, j] = polynomial(coeffs)
-    return poly_matrix
+def create_poly_matrix(N, time_horizon):
+  """
+  Create a polynomial matrix of size N x N with random coefficients.
+  Each entry is a polynomial of degree k.
+  """
+  poly_matrix = np.zeros((N, N), dtype=object)
+  for i in range(N):
+      for j in range(N):
+          if i == j:
+              poly_matrix[i, j] = polynomial([], 0, 0, zero = True)
+              continue
+          else:
+            r1 = np.random.normal(-1, 3)
+            r2 = np.random.normal(5, 3)
+            r3 = np.random.normal(20, 3)
+            r4 = np.random.normal(25, 3)
+            r5 = np.random.normal(9, 3)
+            r6 = np.random.normal(13, 3)
+            roots = (r1, r2, r3, r4, r5, r6)
+            constant = 1.2 * -np.min([-1 * (x - r1) * (x - r2) * (x - r3) * (x - r4) * (x - r5) * (x - r6) for x in range(time_horizon)])
+            scale = np.random.uniform(0.0, 1.0) / 500_000
+            poly_matrix[i, j] = polynomial(roots, constant, scale)
+  return poly_matrix
