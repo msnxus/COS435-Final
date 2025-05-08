@@ -12,7 +12,7 @@ import torch.optim as optim
 from torch.distributions import Categorical
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
-
+import os
 import seaborn as sns
 sns.set(style="darkgrid")
 
@@ -26,6 +26,7 @@ M = 10
 destinations = np.array([i%2 for i in range(20)])
 start_vertex = 1
 start_time = 0
+seed = 50
 
 
 def unpack_obs(obs):
@@ -38,7 +39,7 @@ def unpack_obs(obs):
     
 
 
-def evaluate_policy(policy, poly_matrix, seed=42):
+def evaluate_policy(policy, poly_matrix, seed=50):
     env_test = CityEnv(poly_matrix, N=N, time_horizon=time_horizon, max_steps=max_steps)
     obs, _ = env_test.reset(destinations=destinations, start_time=start_time, start_vertex=start_vertex)
     state = unpack_obs(obs)
@@ -143,7 +144,7 @@ def ppo_update(policy_net, value_net, optimizer, ppo_epochs, mini_batch_size, st
 
             critic_loss = (value_net(states).squeeze(1) - return_).pow(2).mean()
 
-            print(actor_loss, critic_loss)
+            # print(actor_loss, critic_loss)
 
             loss = 0.05 * critic_loss + actor_loss  # You can freely adjust the weight of the critic loss
 
@@ -151,14 +152,17 @@ def ppo_update(policy_net, value_net, optimizer, ppo_epochs, mini_batch_size, st
             loss.backward()
             optimizer.step()
 
-
+def save_model(policy_net, value_net, step, save_dir='checkpoints'):
+    os.makedirs(save_dir, exist_ok=True)
+    torch.save(policy_net.state_dict(), os.path.join(save_dir, f'policy_step{step}.pt'))
+    torch.save(value_net.state_dict(), os.path.join(save_dir, f'value_step{step}.pt'))
 
 
 def train(num_steps=1000, mini_batch_size=8, ppo_epochs=4, threshold=400):
     with open('output1.csv', 'w') as f:
         f.write('step,reward\n')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    polymatrix = create_poly_matrix(N=N, time_horizon=time_horizon)
+    polymatrix = create_poly_matrix(N=N, time_horizon=time_horizon, seed=seed)
     env = CityEnv(polymatrix, N=N, time_horizon=time_horizon, max_steps=max_steps)
     num_vertices = env.n_vertices
 
@@ -184,7 +188,7 @@ def train(num_steps=1000, mini_batch_size=8, ppo_epochs=4, threshold=400):
         masks = []
 
         # Collect samples under the current policy
-        for _ in range(2048):
+        for _ in range(400):
             
             dist, value = policy_net(state), value_net(state)
 
@@ -229,10 +233,8 @@ def train(num_steps=1000, mini_batch_size=8, ppo_epochs=4, threshold=400):
             with open('output1.csv', 'a') as f:
                 f.write(f'{step},{test_reward}\n')
             reward_list.append(test_reward)
-            if test_reward > threshold:
-                print("Solved!")
-                early_stop = True
-                break
+        if step % 500 == 0:
+            save_model(policy_net, value_net, step, save_dir='checkpoints_caiden_model')
     return early_stop, reward_list
 
 

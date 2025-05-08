@@ -20,6 +20,7 @@ class CityEnv(gym.Env):
     def __init__(self, poly_matrix, N, time_horizon, max_steps=50):
         super().__init__()
         self.num_steps = 0
+        self.visited = np.zeros(N)
         # Define the environment parameters
         self.max_steps = max_steps
         self.poly_matrix = poly_matrix
@@ -47,6 +48,7 @@ class CityEnv(gym.Env):
         self.current_time = start_time
         self.current_vertex = start_vertex
         self.num_steps = 0
+        self.visited = np.zeros(self.n_vertices)
 
         observation = (
             self.current_time % self.time_horizon,
@@ -62,6 +64,7 @@ class CityEnv(gym.Env):
 
         i = self.current_vertex
         j = action
+
 
         travel_time = self.poly_matrix[i, j].eval(self.current_time % self.time_horizon)
         
@@ -80,8 +83,8 @@ class CityEnv(gym.Env):
         self.num_steps += 1
         done = not self.destinations.any() or self.num_steps >= self.max_steps
         reward = -travel_time
-        if i == j:
-            reward -= 10
+        
+        self.visited[j] = 1
         # consider adding auxiliary rewards for visiting new (needed) destinations
         info = {}
         return observation, reward, done, False, info

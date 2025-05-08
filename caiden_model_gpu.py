@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import torch.nn.functional as F
 import seaborn as sns
 import warnings
+import os
 
 from new_env import CityEnv
 from poly_matrix import create_poly_matrix
@@ -96,9 +97,15 @@ def compute_advantages(next_value, rewards, masks, values, gamma=0.99, lambda_ga
 
 def ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantages):
     batch_size = states.size(0)
-    for _ in range(batch_size // mini_batch_size):
-        idx = torch.randint(0, batch_size, (mini_batch_size,), device=device)
-        yield states[idx], actions[idx], log_probs[idx], returns[idx], advantages[idx]
+    indices = torch.randperm(batch_size)
+    for i in range(0, batch_size, mini_batch_size):
+        idx = indices[i:i+mini_batch_size]
+        yield (states[idx],
+               actions[idx],
+               log_probs[idx],
+               returns[idx],
+               advantages[idx])  # <-- fixed line
+
 
 def ppo_update(policy_net, value_net, optimizer, ppo_epochs, mini_batch_size,
                states, actions, log_probs, returns, advantages, clip_param=0.2):
@@ -107,17 +114,28 @@ def ppo_update(policy_net, value_net, optimizer, ppo_epochs, mini_batch_size,
             dist = policy_net(state_b)
             new_log_prob = dist.log_prob(action_b)
             ratio = (new_log_prob - old_log_b).exp()
+
             surr1 = ratio * adv_b
             surr2 = torch.clamp(ratio, 1 - clip_param, 1 + clip_param) * adv_b
             actor_loss = -torch.min(surr1, surr2).mean()
             critic_loss = (value_net(state_b).squeeze(1) - return_b).pow(2).mean()
+
+            print(critic_loss, actor_loss)
             loss = 0.5 * critic_loss + actor_loss
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
+
+def save_model(policy_net, value_net, step, save_dir='checkpoints'):
+    os.makedirs(save_dir, exist_ok=True)
+    torch.save(policy_net.state_dict(), os.path.join(save_dir, f'policy_step{step}.pt'))
+    torch.save(value_net.state_dict(), os.path.join(save_dir, f'value_step{step}.pt'))
+
+
+
 def train(num_steps=1000, mini_batch_size=8, ppo_epochs=4, threshold=400):
-    with open('output.csv', 'w') as f:
+    with open('output2_gpu.csv', 'w') as f:
         f.write('step,reward\n')
 
     polymatrix = create_poly_matrix(N=N, time_horizon=time_horizon)
@@ -134,7 +152,7 @@ def train(num_steps=1000, mini_batch_size=8, ppo_epochs=4, threshold=400):
     for step in range(num_steps):
         log_probs, values, states, actions, rewards, masks = [], [], [], [], [], []
 
-        for _ in range(2048):
+        for _ in range(400):
             dist, value = policy_net(state), value_net(state)
             action = dist.sample()
             obs, reward, done, _, _ = env.step(int(action.item()))
@@ -156,24 +174,24 @@ def train(num_steps=1000, mini_batch_size=8, ppo_epochs=4, threshold=400):
             next_value = value_net(state)
 
         returns = compute_advantages(next_value, rewards, masks, values)
-        returns = torch.cat(returns).detach()
-        log_probs = torch.cat(log_probs).detach()
-        values = torch.cat(values).detach().squeeze(1)
+        returns = torch.cat(returns).detach().squeeze()
+        log_probs = torch.cat(log_probs).detach().squeeze()
+        values = torch.cat(values).detach().squeeze()
         states = torch.cat(states)
-        actions = torch.cat(actions).squeeze(1)
+        actions = torch.cat(actions).squeeze()
         advantages = returns - values
+
 
         ppo_update(policy_net, value_net, optimizer, ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantages)
 
         if step % 10 == 0:
             test_reward = np.mean([evaluate_policy(policy_net, poly_matrix=polymatrix) for _ in range(10)])
             print(f'Step: {step}\tReward: {test_reward}')
-            with open('output.csv', 'a') as f:
+            with open('output2_gpu.csv', 'a') as f:
                 f.write(f'{step},{test_reward}\n')
             reward_list.append(test_reward)
-            if test_reward > threshold:
-                print("Solved!")
-                break
+        if step % 500 == 0:
+            save_model(policy_net, value_net, step)
     return reward_list
 
 if __name__ == '__main__':
