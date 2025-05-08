@@ -38,7 +38,6 @@ class CityEnv(gym.Env):
             spaces.MultiBinary(self.n_vertices),  # vertices to visit
             spaces.Discrete(self.n_vertices)  # current vertex
         ))
-        self.observation_space = gym.spaces.flatten_space(self.observation_space)
 
     # Resets the agents current travel time
     # Randomly chooses the tensor that represents the traffic map
@@ -49,11 +48,11 @@ class CityEnv(gym.Env):
         self.current_vertex = start_vertex
         self.num_steps = 0
 
-        observation = gym.spaces.flatten((
+        observation = (
             (self.current_time % self.time_horizon).cpu().numpy(),
             self.destinations.cpu().numpy(),
             self.current_vertex.cpu().numpy()
-        ))
+        )
         info = {}
         return observation, info
 
@@ -72,11 +71,11 @@ class CityEnv(gym.Env):
         self.current_vertex = j
         # update the current time
         self.current_time += travel_time
-        observation = gym.spaces.flatten((
+        observation = (
             (self.current_time % self.time_horizon).cpu().numpy(),
             self.destinations.cpu().numpy(),
             self.current_vertex.cpu().numpy()
-        ))
+        )
 
         self.num_steps += 1
         done = not self.destinations.any() or self.num_steps >= self.max_steps
